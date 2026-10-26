@@ -1,0 +1,34 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Compiler</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>My Compiler</h1>
+
+    <label for="language">Choose programming language:</label>
+    <select id="language">
+        <option value="c">C</option>
+        <option value="cpp">C++</option>
+        <option value="java">Java</option>
+    </select>
+
+    <h2>Code Editor</h2>
+    <textarea id="code" spellcheck="false"></textarea>
+
+    <h3>Program Input (stdin)</h3>
+    <textarea id="programInput"
+        placeholder="Enter input for your program here"></textarea>
+
+    <button id="runButton">Run Code</button>
+
+    <h2>Terminal</h2>
+    <pre id="terminal">Connecting to backend...</pre>
+
+    <script src="script.js"></script>
+</body>
+</html>
