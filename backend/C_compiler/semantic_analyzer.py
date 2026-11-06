@@ -500,12 +500,13 @@ class SemanticAnalyzer:
                     raise SemanticError(
                         "Do-while condition must be numeric or character type."
                     )
-
         elif node.type == "For":
             self.scopes.append({})
+
             try:
                 for child in node.children:
-                    self.analyze(child)
+                    if child is not None:
+                        self.analyze(child)
             finally:
                 self.scopes.pop()
 

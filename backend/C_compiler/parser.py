@@ -232,10 +232,11 @@ class Parser:
         body = self.parse_statement()
 
         children = [
-            node for node in
-            [initialization, condition, update, body]
-            if node is not None
-        ]
+    initialization,
+    condition,
+    update,
+    body
+  ]
 
         return ASTNode("For", children=children)
 
