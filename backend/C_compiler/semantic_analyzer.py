@@ -1,5 +1,5 @@
-from lexer import Lexer, LexerError
-from parser import Parser, ParserError
+from .lexer import Lexer, LexerError
+from .parser import Parser, ParserError
 class SemanticError(Exception):
     pass
 
@@ -181,164 +181,6 @@ class SemanticAnalyzer:
 
         return None
 
-
-    def analyze(self, node):
-        
-        if node.type == "Program":
-            for child in node.children:
-                if child.type == "Function":
-                    name = child.value["name"]
-
-                    if name in self.functions:
-                        raise SemanticError(
-                            f"Function '{name}' is already declared."
-                        )
-
-                    parameter_types = [
-                        item.value
-                        for item in child.children
-                        if item.type == "Parameter"
-                    ]
-
-                    self.functions[name] = {
-                        "return_type": child.value["return_type"],
-                        "parameters": parameter_types
-                    }
-
-            for child in node.children:
-                self.analyze(child)
-
-        elif node.type == "Function":
-            self.scopes.append({})
-            previous_return_type = self.current_return_type
-            self.current_return_type = node.value["return_type"]
-
-            try:
-                for child in node.children:
-                    if child.type == "Parameter":
-                        name = child.children[0].value
-                        self.declare_variable(name, child.value)
-
-                    elif child.type == "Block":
-                        self.analyze(child)
-            finally:
-                self.current_return_type = previous_return_type
-                self.scopes.pop()
-
-        elif node.type == "Block":
-            self.scopes.append({})
-
-            try:
-                for child in node.children:
-                    self.analyze(child)
-            finally:
-                self.scopes.pop()
-
-        elif node.type == "DeclarationList":
-            for declaration in node.children:
-                self.analyze(declaration)
-
-        elif node.type == "VariableDeclaration":
-            name = node.children[0].value
-            data_type = node.value
-
-            self.declare_variable(name, data_type)
-
-            if len(node.children) > 1:
-                actual_type = self.get_expression_type(
-                    node.children[1]
-                )
-
-                if data_type not in {"int", "float", "double"} or actual_type not in {
-                    "int", "float", "double"
-                }:
-                    if data_type != actual_type:
-                        raise SemanticError(
-                            f"Type mismatch in initialization of variable "
-                            f"'{name}': expected '{data_type}', "
-                            f"but got '{actual_type}'."
-                        )
-        
-        elif node.type == "FunctionCall":
-            if node.value == "printf":
-                for argument in node.children:
-                    self.get_expression_type(argument)
-                return "int"
-
-            if node.value not in self.functions:
-                raise SemanticError(
-                    f"Function '{node.value}' is not declared."
-                )
-
-            function = self.functions[node.value]
-            expected_parameters = function["parameters"]
-
-            if len(node.children) != len(expected_parameters):
-                raise SemanticError(
-                    f"Function '{node.value}' expects "
-                    f"{len(expected_parameters)} arguments, "
-                    f"but got {len(node.children)}."
-                )
-
-            for argument, expected_type in zip(
-                node.children, expected_parameters
-            ):
-                actual_type = self.get_expression_type(argument)
-
-                if (
-                    actual_type != expected_type
-                    and not (
-                        actual_type in {"int", "float", "double"}
-                        and expected_type in {"int", "float", "double"}
-                    )
-                ):
-                    raise SemanticError(
-                        f"Type mismatch in argument to function "
-                        f"'{node.value}': expected '{expected_type}', "
-                        f"but got '{actual_type}'."
-                    )
-
-            return function["return_type"]
-
-        elif node.type == "Identifier":
-            if not self.is_declared(node.value):
-                raise SemanticError(
-                    f"Variable '{node.value}' is not declared."
-                )
-
-        elif node.type == "Return":
-            if self.current_return_type == "void" and node.children:
-                raise SemanticError(
-                    "Void function cannot return a value."
-                )
-
-            if self.current_return_type != "void" and not node.children:
-                raise SemanticError(
-                    f"Function returning '{self.current_return_type}' "
-                    "must return a value."
-                )
-
-            if node.children:
-                expression = node.children[0]
-
-                if expression.type == "Literal":
-                    literal_type = self.get_literal_type(
-                        expression.value
-                    )
-
-                    if (
-                        self.current_return_type in {
-                            "int", "float", "double"
-                        }
-                        and literal_type in {"string", "char"}
-                    ):
-                        raise SemanticError(
-                            f"Cannot return '{literal_type}' "
-                            f"from a function returning "
-                            f"'{self.current_return_type}'."
-                        )
-
-                self.analyze(expression) 
 
     def analyze(self, node):
         if node.type == "Program":
@@ -524,15 +366,16 @@ class SemanticAnalyzer:
             for child in node.children:
                 self.analyze(child)
 
-if __name__ == "__main__": 
- sample_code = """
+if __name__ == "__main__":
+    sample_code = """
 int main() {
     int age = 20;
     int result = age + 10;
     return result;
 }
 """
-try:
+
+    try:
         tokens = Lexer(sample_code).tokenize()
         ast = Parser(tokens).parse()
 
@@ -540,5 +383,6 @@ try:
         analyzer.analyze(ast)
 
         print("SEMANTIC ANALYSIS SUCCESSFUL")
-except (LexerError, ParserError, SemanticError) as error:
+
+    except (LexerError, ParserError, SemanticError) as error:
         print("COMPILER ERROR:", error)

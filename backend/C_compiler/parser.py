@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from lexer import Lexer, LexerError
+from .lexer import Lexer, LexerError
 class ParserError(Exception):
     pass
 @dataclass
