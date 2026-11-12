@@ -57,9 +57,10 @@ class SemanticAnalyzer:
             )
 
         elif node.type == "FunctionCall":
-            if node.value == "printf":
+            if node.value in {"printf", "scanf"}:
                 for argument in node.children:
                     self.get_expression_type(argument)
+
                 return "int"
 
             if node.value not in self.functions:

@@ -5,17 +5,171 @@ import json
 import subprocess
 import tempfile
 import uuid
-
+import threading
+import time
+import queue
+from C_compiler.lexer import Lexer, LexerError
+from C_compiler.parser import Parser, ParserError
+from C_compiler.semantic_analyzer import SemanticAnalyzer, SemanticError
+from C_compiler.intermediate_code import (
+    IntermediateCodeGenerator,
+    IntermediateCodeError
+)
+from C_compiler.code_generator import CodeGenerator, CodeGeneratorError
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 
-# Maximum time allowed for compilation and execution.
 TIMEOUT_SECONDS = 5
+
+active_processes = {}
+
+
+process_lock = threading.Lock()
+
+
+
+def read_process_output(process_id, process):
+    try:
+        for line in iter(process.stdout.readline, ""):
+            with process_lock:
+                if process_id in active_processes:
+                    active_processes[process_id]["output"].append(line)
+
+        process.wait()
+
+    finally:
+        process.stdout.close()
+
+        with process_lock:
+            if process_id in active_processes:
+                active_processes[process_id]["finished"] = True
+
+
+def run_c_compiler_phases(source_code):
+        tokens = Lexer(source_code).tokenize()
+        ast = Parser(tokens).parse()
+        SemanticAnalyzer().analyze(ast)
+
+        intermediate_generator = IntermediateCodeGenerator()
+        intermediate_code = intermediate_generator.generate_from_ast(ast)
+        target_code = CodeGenerator().generate(intermediate_code)
+
+        return {
+        "tokens": tokens,
+        "ast": ast,
+        "intermediate_code": intermediate_code,
+        "target_code": target_code
+    }
+
+def create_process_record(process, workdir):
+    process_id = str(uuid.uuid4())
+
+    with process_lock:
+        active_processes[process_id] = {
+            "process": process,
+            "workdir": workdir,
+            "output": [],
+            "finished": False
+        }
+
+    return process_id
 
 
 class CompilerHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(FRONTEND_DIR), **kwargs)
+
+    
+    def launch_program(self, language, code):
+        workdir = tempfile.TemporaryDirectory(
+            prefix="compilora_"
+        )
+
+        directory = Path(workdir.name)
+
+        try:
+            if language == "c":
+                source = directory / "main.c"
+                executable = directory / "main.exe"
+
+                source.write_text(code, encoding="utf-8")
+
+                compile_cmd = [
+                    "gcc",
+                    str(source),
+                    "-o",
+                    str(executable)
+                ]
+
+                run_cmd = [str(executable)]
+
+            elif language == "cpp":
+                source = directory / "main.cpp"
+                executable = directory / "main.exe"
+
+                source.write_text(code, encoding="utf-8")
+
+                compile_cmd = [
+                    "g++",
+                    str(source),
+                    "-o",
+                    str(executable)
+                ]
+
+                run_cmd = [str(executable)]
+
+            else:
+                source = directory / "Main.java"
+
+                source.write_text(code, encoding="utf-8")
+
+                compile_cmd = ["javac", str(source)]
+
+                run_cmd = [
+                    "java",
+                    "-cp",
+                    str(directory),
+                    "Main"
+                ]
+
+            compiled = subprocess.run(
+                compile_cmd,
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_SECONDS
+            )
+
+            if compiled.returncode != 0:
+                workdir.cleanup()
+                return None, compiled.stderr or compiled.stdout
+
+            process = subprocess.Popen(
+                run_cmd,
+                cwd=directory,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+            process_id = create_process_record(
+                process,
+                workdir
+            )
+
+            threading.Thread(
+                target=read_process_output,
+                args=(process_id, process),
+                daemon=True
+            ).start()
+
+            return process_id, None
+
+        except Exception:
+            workdir.cleanup()
+            raise
 
     def send_json(self, status, data):
         body = json.dumps(data).encode("utf-8")
@@ -25,7 +179,179 @@ class CompilerHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def start_program(self, language, code):
+        process_id = str(uuid.uuid4())
+
+        with tempfile.TemporaryDirectory(prefix="compilora_") as temp:
+            workdir = Path(temp)
+
+            if language == "c":
+                source = workdir / "main.c"
+                executable = workdir / "main.exe"
+                source.write_text(code, encoding="utf-8")
+                compile_cmd = ["gcc", str(source), "-o", str(executable)]
+                run_cmd = [str(executable)]
+
+            elif language == "cpp":
+                source = workdir / "main.cpp"
+                executable = workdir / "main.exe"
+                source.write_text(code, encoding="utf-8")
+                compile_cmd = ["g++", str(source), "-o", str(executable)]
+                run_cmd = [str(executable)]
+
+            else:
+                source = workdir / "Main.java"
+                source.write_text(code, encoding="utf-8")
+                compile_cmd = ["javac", str(source)]
+                run_cmd = ["java", "-cp", str(workdir), "Main"]
+
+            compiled = subprocess.run(
+                compile_cmd,
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=TIMEOUT_SECONDS
+            )
+
+            if compiled.returncode != 0:
+                return None, compiled.stderr or compiled.stdout
+
+            return "Compilation successful", None
+
+    
+    def do_POST(self):
+        if self.path == "/api/start":
+            try:
+                length = int(
+                    self.headers.get("Content-Length", "0")
+                )
+                request = json.loads(self.rfile.read(length))
+
+                language = request.get("language")
+                code = request.get("code", "")
+
+                if language not in ("c", "cpp", "java"):
+                    self.send_json(400, {
+                        "error": "Invalid language"
+                    })
+                    return
+
+                if not isinstance(code, str) or not code.strip():
+                    self.send_json(400, {
+                        "error": "Please enter code"
+                    })
+                    return
+
+                try:
+                    process_id, error = self.launch_program(
+                        language,
+                        code
+                    )
+                except subprocess.TimeoutExpired:
+                    self.send_json(200, {
+                        "status": "error",
+                        "output": "Compilation timed out."
+                    })
+                    return
+
+                if error:
+                    self.send_json(200, {
+                        "status": "error",
+                        "output": error
+                    })
+                    return
+
+                self.send_json(200, {
+                    "status": "success",
+                    "process_id": process_id,
+                    "output": "Program started.\n"
+                })
+                return
+
+            except Exception as exc:
+                self.send_json(500, {
+                    "error": str(exc)
+                })
+                return
+
+        if self.path == "/api/input":
+            try:
+                length = int(
+                    self.headers.get("Content-Length", "0")
+                )
+                request = json.loads(self.rfile.read(length))
+
+                process_id = request.get("process_id")
+                user_input = request.get("input", "")
+
+                with process_lock:
+                    record = active_processes.get(process_id)
+
+                    if not record:
+                        self.send_json(404, {
+                            "error": "Program not found"
+                        })
+                        return
+
+                    process = record["process"]
+
+                    if process.poll() is not None:
+                        self.send_json(400, {
+                            "error": "Program has already finished"
+                        })
+                        return
+
+                    process.stdin.write(user_input + "\n")
+                    process.stdin.flush()
+
+                self.send_json(200, {
+                    "status": "success"
+                })
+                return
+
+            except Exception as exc:
+                self.send_json(500, {
+                    "error": str(exc)
+                })
+                return
+
+        self.send_json(404, {
+            "error": "Endpoint not found"
+        })
+
+    
+    def get_program_output(self):
+        from urllib.parse import parse_qs, urlparse
+
+        query = parse_qs(urlparse(self.path).query)
+        process_id = query.get("process_id", [""])[0]
+
+        with process_lock:
+            record = active_processes.get(process_id)
+
+            if not record:
+                self.send_json(404, {
+                    "status": "error",
+                    "output": "Program not found."
+                })
+                return
+
+            output = "".join(record["output"])
+            record["output"].clear()
+
+            process = record["process"]
+            finished = process.poll() is not None
+
+            self.send_json(200, {
+                "status": "finished" if finished else "running",
+                "output": output
+            })
+
+
     def do_GET(self):
+        if self.path.startswith("/api/output"):
+            self.get_program_output()
+            return
         if self.path == "/api/health":
             self.send_json(200, {
                 "status": "ok",
@@ -37,123 +363,6 @@ class CompilerHandler(SimpleHTTPRequestHandler):
             self.path = "/index.html"
 
         super().do_GET()
-
-    def do_POST(self):
-        if self.path != "/api/run":
-            self.send_json(404, {"error": "Endpoint not found"})
-            return
-
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 100_000:
-                self.send_json(400, {"error": "Invalid request size"})
-                return
-
-            request = json.loads(self.rfile.read(length))
-            language = request.get("language")
-            code = request.get("code", "")
-            stdin = request.get("input", "")
-
-            if language not in ("c", "cpp", "java"):
-                self.send_json(400, {"error": "Choose C, C++, or Java"})
-                return
-
-            if not isinstance(code, str) or not code.strip():
-                self.send_json(400, {"error": "Please enter some code"})
-                return
-
-            if not isinstance(stdin, str) or len(stdin) > 20_000:
-                self.send_json(400, {"error": "Invalid program input"})
-                return
-
-            with tempfile.TemporaryDirectory(prefix="my_compiler_") as temp:
-                workdir = Path(temp)
-
-                if language == "c":
-                    source = workdir / "main.c"
-                    executable = workdir / "main.exe"
-                    source.write_text(code, encoding="utf-8")
-
-                    compile_cmd = ["gcc", str(source), "-o", str(executable)]
-                    run_cmd = [str(executable)]
-
-                elif language == "cpp":
-                    source = workdir / "main.cpp"
-                    executable = workdir / "main.exe"
-                    source.write_text(code, encoding="utf-8")
-
-                    compile_cmd = ["g++", str(source), "-o", str(executable)]
-                    run_cmd = [str(executable)]
-
-                else:
-                    source = workdir / "Main.java"
-                    source.write_text(code, encoding="utf-8")
-
-                    compile_cmd = ["javac", str(source)]
-                    run_cmd = ["java", "-cp", str(workdir), "Main"]
-
-                try:
-                    compiled = subprocess.run(
-                        compile_cmd,
-                        cwd=workdir,
-                        capture_output=True,
-                        text=True,
-                        timeout=TIMEOUT_SECONDS
-                    )
-                except subprocess.TimeoutExpired:
-                    self.send_json(200, {
-                        "status": "error",
-                        "output": "Compilation timed out."
-                    })
-                    return
-                except OSError as exc:
-                    self.send_json(200, {
-                        "status": "error",
-                        "output": f"Could not start compiler: {exc}"
-                    })
-                    return
-
-                if compiled.returncode != 0:
-                    self.send_json(200, {
-                        "status": "error",
-                        "output": compiled.stderr or compiled.stdout
-                    })
-                    return
-
-                try:
-                    result = subprocess.run(
-                        run_cmd,
-                        cwd=workdir,
-                        input=stdin,
-                        capture_output=True,
-                        text=True,
-                        timeout=TIMEOUT_SECONDS
-                    )
-                except subprocess.TimeoutExpired:
-                    self.send_json(200, {
-                        "status": "error",
-                        "output": "Program timed out."
-                    })
-                    return
-
-                output = result.stdout
-                if result.stderr:
-                    output += result.stderr
-
-                self.send_json(200, {
-                    "status": "success" if result.returncode == 0 else "error",
-                    "output": output or (
-                        "Program finished with no output."
-                        if result.returncode == 0
-                        else f"Program exited with code {result.returncode}."
-                    )
-                })
-
-        except (ValueError, json.JSONDecodeError):
-            self.send_json(400, {"error": "Invalid JSON request"})
-        except Exception as exc:
-            self.send_json(500, {"error": f"Server error: {exc}"})
-
 
 if __name__ == "__main__":
     server = ThreadingHTTPServer(

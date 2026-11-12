@@ -54,12 +54,33 @@ class Lexer:
                 self.advance(whitespace.group())
                 continue
 
+           
             line, column = self.line, self.column
+
+            # Handle C preprocessor directives.
+             # Handle C preprocessor directives.
+            if remaining[0] == "#":
+                line_start = self.source.rfind(
+                    "\n", 0, self.position
+                ) + 1
+
+                prefix = self.source[line_start:self.position]
+
+                if prefix.strip() == "":
+                    directive = re.match(
+                        r"#[^\n]*(?:\\\n[^\n]*)*",
+                        remaining
+                    )
+
+                    if directive:
+                        self.advance(directive.group())
+                        continue
 
             if remaining.startswith("//"):
                 comment = re.match(r"//[^\n]*", remaining)
                 self.advance(comment.group())
                 continue
+
 
             if remaining.startswith("/*"):
                 end = remaining.find("*/", 2)
