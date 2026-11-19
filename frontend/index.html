@@ -1,34 +1,56 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Compiler</title>
+    <title>Compilora - Online Compiler</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>My Compiler</h1>
 
-    <label for="language">Choose programming language:</label>
-    <select id="language">
-        <option value="c">C</option>
-        <option value="cpp">C++</option>
-        <option value="java">Java</option>
-    </select>
+    <div class="container">
 
-    <h2>Code Editor</h2>
-    <textarea id="code" spellcheck="false"></textarea>
+        <header>
+            <h1>Compilora</h1>
 
-    <h3>Program Input (stdin)</h3>
-    <textarea id="programInput"
-        placeholder="Enter input for your program here"></textarea>
+            <div class="language-section">
+                <label for="language">Programming Language:</label>
 
-    <button id="runButton">Run Code</button>
+                <select id="language">
+                    <option value="c">C</option>
+                    <option value="cpp">C++</option>
+                    <option value="java">Java</option>
+                </select>
+            </div>
+        </header>
 
-    <h2>Terminal</h2>
-    <pre id="terminal">Connecting to backend...</pre>
+        <main class="workspace">
+
+            <section class="editor-section">
+                <h2>Code Editor</h2>
+
+                <textarea
+                    id="code"
+                    spellcheck="false"
+                    placeholder="Write your code here..."
+                ></textarea>
+
+                <button id="runButton">Run Code</button>
+            </section>
+
+            <section class="terminal-section">
+                <h2>Terminal</h2>
+
+                <div class="terminal">
+                    <div id="terminal" class="terminal-content">Program started...</div>
+                </div>
+            </section>
+
+        </main>
+
+    </div>
 
     <script src="script.js"></script>
+
 </body>
 </html>
