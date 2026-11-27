@@ -28,12 +28,36 @@ class Parser:
             return self.advance()
         return None
 
+
+
     def expect(self, value):
         token = self.match(value)
+
         if token is None:
+            current = self.current()
+
+            if current:
+                line = current.line
+                column = current.column
+                found = current.value
+            else:
+                last_token = self.tokens[-1] if self.tokens else None
+
+                if last_token:
+                    line = last_token.line
+                    column = last_token.column + len(last_token.value)
+                else:
+                    line = 1
+                    column = 1
+
+                found = "end of file"
+
             raise ParserError(
-                f"Expected '{value}' but found '{self.value()}'"
+                f"Syntax Error: Expected '{value}' "
+                f"but found '{found}' "
+                f"at Line {line}, Column {column}"
             )
+
         return token
 
     def parse(self):
@@ -50,8 +74,12 @@ class Parser:
                 program.append(self.parse_function_or_declaration())
 
             else:
+                token = self.current()
+
                 raise ParserError(
-                    f"Unexpected token '{self.value()}'"
+                    f"Syntax Error: Unexpected token "
+                    f"'{token.value}' "
+                    f"at Line {token.line}, Column {token.column}"
                 )
 
         return {
@@ -73,6 +101,7 @@ class Parser:
             "type": "UsingNamespace",
             "name": "std"
         }
+
 
     def parse_function_or_declaration(self):
         data_type = self.advance().value
@@ -100,9 +129,10 @@ class Parser:
                     break
 
             self.expect(")")
-
             self.expect("{")
+
             body = self.parse_block()
+
             self.expect("}")
 
             return {
@@ -113,8 +143,11 @@ class Parser:
                 "body": body
             }
 
-        self.expect("=")
-        value = self.parse_expression()
+        value = None
+
+        if self.match("="):
+            value = self.parse_expression()
+
         self.expect(";")
 
         return {
@@ -144,6 +177,17 @@ class Parser:
                 "type": "Return",
                 "value": value
             }
+        if self.match("break"):
+            self.expect(";")
+            return {
+                "type": "Break"
+            }
+
+        if self.match("continue"):
+            self.expect(";")
+            return {
+                "type": "Continue"
+            }
 
         if self.match("cout"):
             return self.parse_cout()
@@ -167,6 +211,35 @@ class Parser:
 
         if token and token.type == "IDENTIFIER":
             name = self.advance().value
+
+            if self.value() in ("++", "--"):
+                operator = self.advance().value
+                self.expect(";")
+
+                return {
+                    "type": "Increment",
+                    "name": name,
+                    "operator": operator
+                }
+
+            if self.match("("):
+                arguments = []
+
+                if self.value() != ")":
+                    arguments.append(self.parse_expression())
+
+                    while self.match(","):
+                        arguments.append(self.parse_expression())
+
+                self.expect(")")
+                self.expect(";")
+
+                return {
+                    "type": "FunctionCall",
+                    "name": name,
+                    "arguments": arguments
+                }
+
             self.expect("=")
             value = self.parse_expression()
             self.expect(";")
@@ -176,7 +249,6 @@ class Parser:
                 "name": name,
                 "value": value
             }
-
         raise ParserError(
             f"Invalid statement near '{self.value()}'"
         )
@@ -256,11 +328,10 @@ class Parser:
         }
     
 
+
     def parse_for(self):
         self.expect("for")
         self.expect("(")
-
-        initializer = None
 
         if self.value() == "int":
             initializer = self.parse_function_or_declaration()
@@ -281,7 +352,11 @@ class Parser:
 
         update_name = self.advance().value
         update_operator = self.advance().value
-        update_value = self.parse_expression()
+
+        if update_operator in ("++", "--"):
+            update_value = None
+        else:
+            update_value = self.parse_expression()
 
         self.expect(")")
 
@@ -318,6 +393,7 @@ class Parser:
             "condition": condition,
             "body": body
         }
+
     def parse_expression(self):
         left = self.current()
 
@@ -354,11 +430,16 @@ class Parser:
             return {"type": "Endl"}
 
         else:
+            token = self.current()
+
             raise ParserError(
-                f"Invalid expression near '{self.value()}'"
+                f"Syntax Error: Invalid expression "
+                f"near '{token.value}' "
+                f"at Line {token.line}, Column {token.column}"
             )
 
         operators = (
+            "||", "&&",
             "==", "!=", "<=", ">=", "<", ">",
             "+", "-", "*", "/", "%"
         )
@@ -375,3 +456,4 @@ class Parser:
             }
 
         return left_value
+

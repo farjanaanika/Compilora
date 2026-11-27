@@ -76,17 +76,52 @@ class IntermediateCodeGenerator:
         kind = statement["type"]
 
         if kind == "Declaration":
-            value = self.generate_expression(statement["value"])
+            value = statement["value"]
 
-            self.instructions.append(
-                f"DECLARE {statement['data_type']} "
-                f"{statement['name']} = {value}"
-            )
+            if value is None:
+                self.instructions.append(
+                    f"DECLARE {statement['data_type']} "
+                    f"{statement['name']}"
+                )
+            else:
+                value = self.generate_expression(value)
+
+                self.instructions.append(
+                    f"DECLARE {statement['data_type']} "
+                    f"{statement['name']} = {value}"
+                )
 
         elif kind == "Assignment":
             value = self.generate_expression(statement["value"])
             self.instructions.append(
                 f"{statement['name']} = {value}"
+            )
+
+        elif kind == "Increment":
+            name = statement["name"]
+            operator = statement["operator"]
+
+            if operator == "++":
+                self.instructions.append(
+                    f"{name} = {name} + 1"
+                )
+            elif operator == "--":
+                self.instructions.append(
+                    f"{name} = {name} - 1"
+                )
+        elif kind == "Break":
+            self.instructions.append("BREAK")
+
+        elif kind == "Continue":
+            self.instructions.append("CONTINUE")
+        elif kind == "FunctionCall":
+            arguments = [
+                self.generate_expression(argument)
+                for argument in statement["arguments"]
+            ]
+
+            self.instructions.append(
+                f"CALL {statement['name']} ({', '.join(arguments)})"
             )
 
         elif kind == "Output":
@@ -212,12 +247,26 @@ class IntermediateCodeGenerator:
             self.generate_statement(item)
 
         update = statement["update"]
-        update_value = self.generate_expression(update["value"])
 
-        self.instructions.append(
-            f"{update['name']} {update['operator']} "
-            f"{update_value}"
-        )
+        if update["operator"] == "++":
+            update_instruction = (
+                f"{update['name']} = {update['name']} + 1"
+            )
+        elif update["operator"] == "--":
+            update_instruction = (
+                f"{update['name']} = {update['name']} - 1"
+            )
+        else:
+            update_value = self.generate_expression(
+                update["value"]
+            )
+
+            update_instruction = (
+                f"{update['name']} {update['operator']} "
+                f"{update_value}"
+            )
+
+        self.instructions.append(update_instruction)
 
         self.instructions.append(f"GOTO {start_label}")
         self.instructions.append(f"LABEL {end_label}")

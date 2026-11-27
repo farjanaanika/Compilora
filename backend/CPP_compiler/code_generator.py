@@ -136,6 +136,7 @@ class CodeGenerator:
                 )
 
             elif instruction.startswith("RETURN "):
+
                 value = instruction[7:]
 
                 value = value.replace("CALL ", "")
@@ -143,6 +144,26 @@ class CodeGenerator:
 
                 output.append(
                     "    " * indent + f"return {value};"
+                )
+
+            elif instruction == "BREAK":
+                if not loop_stack:
+                    raise CodeGeneratorError(
+                        "break statement outside loop"
+                    )
+
+                output.append(
+                    "    " * indent + "break;"
+                )
+
+            elif instruction == "CONTINUE":
+                if not loop_stack:
+                    raise CodeGeneratorError(
+                        "continue statement outside loop"
+                    )
+
+                output.append(
+                    "    " * indent + "continue;"
                 )
 
             elif instruction.startswith("IF_FALSE "):

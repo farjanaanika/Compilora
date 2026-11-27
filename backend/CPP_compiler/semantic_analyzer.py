@@ -44,6 +44,11 @@ class SemanticAnalyzer:
         )
 
     def analyze_expression(self, expression):
+        if expression is None:
+            return
+
+        if isinstance(expression, dict):
+            return
         if isinstance(expression, dict):
             return
 
@@ -81,6 +86,16 @@ class SemanticAnalyzer:
         elif statement_type == "Input":
             for name in statement["variables"]:
                 self.find_variable(name)
+    
+        elif statement["type"] == "Increment":
+            self.find_variable(statement["name"])
+
+        elif statement_type == "Break":
+            pass
+
+        elif statement_type == "Continue":
+            pass
+
 
         elif statement_type == "Return":
             self.analyze_expression(statement["value"])
@@ -125,3 +140,12 @@ class SemanticAnalyzer:
                 self.analyze_statement(item)
 
             self.scopes.pop()
+
+        elif statement_type == "FunctionCall":
+            if statement["name"] not in self.functions:
+                raise SemanticError(
+                    f"Function '{statement['name']}' is not declared."
+                )
+
+            for argument in statement["arguments"]:
+                self.analyze_expression(argument)

@@ -2,7 +2,6 @@ from .lexer import Lexer, LexerError
 from .parser import Parser, ParserError
 from .code_optimizer import CodeOptimizer
 
-
 class IntermediateCodeError(Exception):
     pass
 
