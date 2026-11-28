@@ -16,6 +16,12 @@ from C_compiler.intermediate_code import (
     IntermediateCodeError
 )
 from C_compiler.code_generator import CodeGenerator, CodeGeneratorError
+from CPP_compiler.lexer import Lexer as CPPLexer
+from CPP_compiler.parser import Parser as CPPParser
+from CPP_compiler.semantic_analyzer import SemanticAnalyzer as CPPSemanticAnalyzer
+from CPP_compiler.intermediate_code import IntermediateCodeGenerator as CPPIntermediateCodeGenerator
+from CPP_compiler.code_optimizer import CodeOptimizer as CPPCodeOptimizer
+from CPP_compiler.code_generator import CodeGenerator as CPPCodeGenerator
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 
@@ -28,12 +34,18 @@ process_lock = threading.Lock()
 
 
 
+
 def read_process_output(process_id, process):
     try:
-        for line in iter(process.stdout.readline, ""):
+        while True:
+            chunk = process.stdout.read(1)
+
+            if not chunk:
+                break
+
             with process_lock:
                 if process_id in active_processes:
-                    active_processes[process_id]["output"].append(line)
+                    active_processes[process_id]["output"].append(chunk)
 
         process.wait()
 
@@ -44,20 +56,26 @@ def read_process_output(process_id, process):
             if process_id in active_processes:
                 active_processes[process_id]["finished"] = True
 
+def run_cpp_compiler_phases(source_code):
+    tokens = CPPLexer(source_code).tokenize()
 
-def run_c_compiler_phases(source_code):
-        tokens = Lexer(source_code).tokenize()
-        ast = Parser(tokens).parse()
-        SemanticAnalyzer().analyze(ast)
+    ast = CPPParser(tokens).parse()
 
-        intermediate_generator = IntermediateCodeGenerator()
-        intermediate_code = intermediate_generator.generate_from_ast(ast)
-        target_code = CodeGenerator().generate(intermediate_code)
+    CPPSemanticAnalyzer().analyze(ast)
 
-        return {
+    intermediate_generator = CPPIntermediateCodeGenerator()
+
+    intermediate_code = intermediate_generator.generate_from_ast(ast)
+
+    optimized_code = CPPCodeOptimizer().optimize(intermediate_code)
+
+    target_code = CPPCodeGenerator().generate(optimized_code)
+
+    return {
         "tokens": tokens,
         "ast": ast,
         "intermediate_code": intermediate_code,
+        "optimized_code": optimized_code,
         "target_code": target_code
     }
 
@@ -94,24 +112,67 @@ class CompilerHandler(SimpleHTTPRequestHandler):
 
                 source.write_text(code, encoding="utf-8")
 
+                buffering_code = """
+                #include <stdio.h>
+                __attribute__((constructor))
+                void setup_buffering() {
+                    setvbuf(stdout, NULL, _IONBF, 0);
+                }
+                """
+
+                support_file = directory / "buffering.c"
+                support_file.write_text(
+                    buffering_code,
+                    encoding="utf-8"
+                )
+
                 compile_cmd = [
                     "gcc",
                     str(source),
+                    str(support_file),
                     "-o",
                     str(executable)
                 ]
 
                 run_cmd = [str(executable)]
-
             elif language == "cpp":
                 source = directory / "main.cpp"
+                generated_source = directory / "generated.cpp"
                 executable = directory / "main.exe"
 
-                source.write_text(code, encoding="utf-8")
+                source.write_text(
+                    code,
+                    encoding="utf-8"
+                )
+
+                syntax_check = subprocess.run(
+                    [
+                        "g++",
+                        "-fsyntax-only",
+                        str(source)
+                    ],
+                    cwd=directory,
+                    capture_output=True,
+                    text=True,
+                    timeout=TIMEOUT_SECONDS
+                )
+
+                if syntax_check.returncode != 0:
+                    workdir.cleanup()
+                    return None, syntax_check.stderr or syntax_check.stdout
+
+                compiler_result = run_cpp_compiler_phases(code)
+
+                generated_code = compiler_result["target_code"]
+
+                generated_source.write_text(
+                    generated_code,
+                    encoding="utf-8"
+                )
 
                 compile_cmd = [
                     "g++",
-                    str(source),
+                    str(generated_source),
                     "-o",
                     str(executable)
                 ]
@@ -151,7 +212,7 @@ class CompilerHandler(SimpleHTTPRequestHandler):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1
+                bufsize=0
             )
 
             process_id = create_process_record(
